@@ -36,6 +36,9 @@
 #include <message_filters/time_synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
 
+
+#include <glog/logging.h>
+
 // Custom for package
 #include "utility.h"
 
@@ -158,6 +161,7 @@ void PropagateIMU(const OdomMsgPtr &odom,
                   const vector<double> &ts, const vector<Vector3d> &gyro_, const vector<Vector3d> &acce_,
                   vector<Quaternd> &q, vector<Vector3d> &p, vector<Vector3d> &v)
 {   
+    LOG(INFO) << "In the PropagateIMU";
     // Some constant guestimated from SLICT experiment
     static Vector3d grav(9.82, 0, 0); static Vector3d bg(-0.022, -0.033, 0.004); static Vector3d ba(0.0, 0, 0.1);
 
@@ -177,13 +181,17 @@ void PropagateIMU(const OdomMsgPtr &odom,
         double tn = ts[i]; Vector3d gyrn = gyro_[i]; Vector3d accn = acce_[i];
         
         /* ASSIGNMENT BLOCK START -----------------------------------------------------------------------------------*/
-        
+        // reference: https://github.com/HKUST-Aerial-Robotics/VINS-Fusion/blob/master/vins_estimator/src/estimator/estimator.cpp#L1571
+        double dt = tn - ts[i-1];
+        Eigen::Vector3d un_acc = Qo * (acco - ba) - grav;
+        Eigen::Vector3d un_gyr = 0.5 * (gyrn + gyro) - bg;
+
         // Propagate the poses by updating Qn, Vn, Pn below.
         // NOTE: you may need to use the function deltaQ(theta) in file include/utility.h to update quaternion.
 
-        Quaternd Qn = Qo;   // Change Qn to the IMU propagated quaternion
-        Vector3d Vn = Vo;   // Change Vn to the IMU propagated velocity
-        Vector3d Pn = Po;   // Change Pn to the IMU propagated position
+        Quaternd Qn = Qo * Util::deltaQ(un_gyr * dt);   // Change Qn to the IMU propagated quaternion
+        Vector3d Vn = Vo + un_acc * dt;   // Change Vn to the IMU propagated velocity
+        Vector3d Pn = Po + Vo * dt + 0.5 * un_acc * dt * dt;   // Change Pn to the IMU propagated position
 
         /* ASSIGNMENT BLOCK END -------------------------------------------------------------------------------------*/
 
@@ -228,15 +236,25 @@ void DeskewByImuPropagation(const CloudOusterPtr &cloudSkewed, const OdomMsgPtr 
 
             // Step 1: Find the j such that ts[j] < ti < ts[j+1], where ti is the point sample time, ts[j] is the IMU sample time
             int j = -1; // Change j
+            for(j=0; j<ts.size(); j++){
+                if(ts[j] < ti && ti < ts[j+1])
+                    break;
+            }
 
             if (j >= 0)
             {
                 // Step 2: Find the linear interpolated pose (q_ti, p_ti)
                 // Note: look up https://eigen.tuxfamily.org/dox/classEigen_1_1QuaternionBase.html#ac840bde67d22f2deca330561c65d144e
+                Quaternd q_ti = q_W_Bs[j].slerp((ti-ts[j])/(ts[j+1]- ts[j]), q_W_Bs[j+1]);
+                Vector3d p_ti = ((p_W_Bs[j+1]-p_W_Bs[j]) / (ts[j+1]-ts[j])) * (ti-ts[j]) + p_W_Bs[j];
 
                 // Step 3: Transform the point pi (which is in B_ti frame) to world frame. Assign the value to the variable po
                 // Note: Eigen supports the operation Vector3d = Quaternion*Vector.
-
+                Vector3d Vpi(pi.x, pi.y, pi.z);
+                Vector3d Vp0 = q_ti*Vpi+p_ti; 
+                po.x = Vp0[0];
+                po.y = Vp0[1];
+                po.z = Vp0[2];
             }
 
         /* ASSIGNMENT BLOCK END -------------------------------------------------------------------------------------*/
@@ -342,6 +360,12 @@ void processData()
 
 int main(int argc, char **argv)
 {
+    // Setup logging.
+    google::InitGoogleLogging(argv[0]);
+    google::InstallFailureSignalHandler();
+    FLAGS_colorlogtostderr = true;
+    google::SetStderrLogging(google::INFO);
+
     ros::init(argc, argv, "oblam_deskew");
     ros::NodeHandle nh("~");
     nh_ptr = boost::make_shared<ros::NodeHandle>(nh);

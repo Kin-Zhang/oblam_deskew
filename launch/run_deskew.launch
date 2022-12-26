@@ -1,7 +1,7 @@
 <launch>
 
-    <arg name="pose_bag_file"  default="/home/tmn/dev_ws/src/oblam_deskew/data/newer_college_06_pose_gt_.bag"/>
-    <arg name="data_bag_file"  default="/home/tmn/dev_ws/src/oblam_deskew/data/06_dynamic_spinning_ouster_.bag"/>
+    <arg name="pose_bag_file"  default="/home/kin/bags/ntu_viral/A4/newer_college_06_pose_gt.bag"/>
+    <arg name="data_bag_file"  default="/home/kin/bags/ntu_viral/A4/06_dynamic_spinning_ouster.bag"/>
 
     <!-- Launch the imu fusion node -->
     <node pkg="robot_localization" type="ekf_localization_node" output="log" name="ekf_se" clear_params="true">
